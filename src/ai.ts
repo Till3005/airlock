@@ -1,6 +1,18 @@
-import { scrubber, analyst, sourceOf } from './firebase';
+import { scrubber, scrubberCloud, analyst, scrubberLite, analystLite, sourceOf, onDeviceReady } from './firebase';
+import type { GenerativeModel, GenerateContentResult } from 'firebase/ai';
 export type { Source } from './firebase';
 import type { Source } from './firebase';
+
+// Retry once on the lite cloud model when the primary is saturated (5xx).
+async function gen(primary: GenerativeModel, fallback: GenerativeModel, prompt: string): Promise<GenerateContentResult> {
+  try {
+    return await primary.generateContent(prompt);
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    if (!/\[(5\d\d|429)\s/.test(msg)) throw e;
+    return fallback.generateContent(prompt);
+  }
+}
 
 export interface PiiEntity {
   type: string;
@@ -34,7 +46,8 @@ ${text}
 """`;
 
 export async function detectPii(text: string): Promise<ScrubResult> {
-  const res = await scrubber.generateContent(SCRUB_PROMPT(text));
+  const primary = (await onDeviceReady()) ? scrubber : scrubberCloud;
+  const res = await gen(primary, scrubberLite, SCRUB_PROMPT(text));
   const source = sourceOf(res.response);
   const raw = res.response.text().trim();
   let entities: PiiEntity[] = [];
@@ -82,12 +95,12 @@ ${text}
 """`;
 
 export async function analyzeDocument(text: string): Promise<AnalyzeResult> {
-  const res = await analyst.generateContent(ANALYZE_PROMPT(text));
+  const res = await gen(analyst, analystLite, ANALYZE_PROMPT(text));
   return { markdown: res.response.text(), source: sourceOf(res.response) };
 }
 
 export async function askQuestion(sanitized: string, question: string): Promise<AnalyzeResult> {
-  const res = await analyst.generateContent(
+  const res = await gen(analyst, analystLite,
     `Document (scrubbed, sensitive entities appear as [type-N] tokens):\n"""\n${sanitized}\n"""\n\nQuestion: ${question}\n\nAnswer concisely. Use the [token] placeholders verbatim when referring to redacted entities.`,
   );
   return { markdown: res.response.text(), source: sourceOf(res.response) };

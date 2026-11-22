@@ -38,12 +38,41 @@ export const scrubber: GenerativeModel = getGenerativeModel(ai, {
   inCloudParams: { model: 'gemini-3.8-flash' },
 });
 
+// Same scrub job pinned to cloud: used when Gemini Nano isn't ready on this
+// browser (still downloading or absent), so the request doesn't stall on the
+// on-device probe.
+export const scrubberCloud: GenerativeModel = getGenerativeModel(ai, {
+  mode: InferenceMode.ONLY_IN_CLOUD,
+  inCloudParams: { model: 'gemini-3.8-flash' },
+});
+
+// Whether an on-device model can serve a prompt right now.
+export async function onDeviceReady(): Promise<boolean> {
+  try {
+    const lm = (self as unknown as { LanguageModel?: { availability(): Promise<string> } }).LanguageModel;
+    return !!lm && (await lm.availability()) === 'available';
+  } catch {
+    return false;
+  }
+}
+
 // Analyst: prefers the stronger cloud model for synthesis quality, falling
 // back to the on-device model when offline or unauthenticated — the other
 // direction of the same hybrid SDK.
 export const analyst: GenerativeModel = getGenerativeModel(ai, {
   mode: InferenceMode.PREFER_IN_CLOUD,
   inCloudParams: { model: 'gemini-3.8-flash' },
+});
+
+// Capacity fallback: when the primary cloud model is saturated (5xx), the
+// caller retries once on the lite variant rather than failing the request.
+export const scrubberLite: GenerativeModel = getGenerativeModel(ai, {
+  mode: InferenceMode.PREFER_IN_CLOUD,
+  inCloudParams: { model: 'gemini-3.1-flash-lite' },
+});
+export const analystLite: GenerativeModel = getGenerativeModel(ai, {
+  mode: InferenceMode.PREFER_IN_CLOUD,
+  inCloudParams: { model: 'gemini-3.1-flash-lite' },
 });
 
 export type Source = 'on_device' | 'cloud' | 'unknown';
